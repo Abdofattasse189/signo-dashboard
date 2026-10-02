@@ -8,6 +8,7 @@ import mqtt_client as mqtt
 import session
 from assets import CSS, GLOVE_SVG, CHAT_INPUT_JS
 
+# ─── الصفحات (الترتيب إلزامي) ───
 import sensors
 import ai_studio
 import voice
@@ -16,17 +17,20 @@ import chat
 
 
 # ═══════════════════════════════════════════════════════════
-# ترتيب الصفحات المطلوب
+# ترتيب الصفحات في القائمة الجانبية
 # ═══════════════════════════════════════════════════════════
 PAGES = [
-    sensors,      # 1
-    ai_studio,    # 2
-    voice,        # 3
-    files,        # 4
-    chat,         # 5
+    sensors,       # 1 · لوحة الحساسات
+    ai_studio,     # 2 · استوديو الذكاء الاصطناعي
+    voice,         # 3 · تحويل النص إلى صوت
+    files,         # 4 · مستودع الملفات
+    chat,          # 5 · غرفة التواصل
 ]
 
 
+# ═══════════════════════════════════════════════════════════
+# تشغيل MQTT
+# ═══════════════════════════════════════════════════════════
 mqtt.start()
 
 
@@ -35,6 +39,9 @@ def _shutdown():
     mqtt.stop()
 
 
+# ═══════════════════════════════════════════════════════════
+# الصفحة الرئيسية
+# ═══════════════════════════════════════════════════════════
 @ui.page('/')
 async def main_page():
     ui.add_head_html(CSS)
@@ -47,6 +54,9 @@ async def main_page():
         _build_app(user)
 
 
+# ═══════════════════════════════════════════════════════════
+# شاشة اختيار الهوية
+# ═══════════════════════════════════════════════════════════
 def _build_login():
     def choose(name):
         if session.set_user(name):
@@ -72,6 +82,9 @@ def _build_login():
                         ui.label(uname).classes('app-login-user-name')
 
 
+# ═══════════════════════════════════════════════════════════
+# التطبيق الكامل (بعد تسجيل الدخول)
+# ═══════════════════════════════════════════════════════════
 def _build_app(user):
     meta = session.get_meta(user)
     state = {'i': 0}
@@ -90,16 +103,25 @@ def _build_app(user):
         for k, b in enumerate(nav_buttons):
             b.classes(add='active') if k == i else b.classes(remove='active')
         if hasattr(PAGES[i], 'on_enter'):
-            PAGES[i].on_enter()
+            try:
+                PAGES[i].on_enter()
+            except Exception as e:
+                print(f'[on_enter] {PAGES[i].__name__}: {e}', flush=True)
 
+    # ═══════════════════════════════════════════════════════
+    # الشريط الجانبي
+    # ═══════════════════════════════════════════════════════
     with ui.left_drawer(value=True, bordered=False).props('width=250').classes('p-0'):
         with ui.column().classes('w-full h-full gap-0'):
+
+            # ─── الشعار ───
             with ui.element('div').classes('brand-block'):
                 with ui.element('div').classes('brand-left'):
                     ui.html(GLOVE_SVG).classes('brand-glove')
                     ui.label('SIGNO').classes('brand')
                 ui.label('◼').classes('brand-mark')
 
+            # ─── أزرار التنقل ───
             with ui.column().classes('nav-list'):
                 for i, page in enumerate(PAGES):
                     btn = ui.button(
@@ -111,6 +133,7 @@ def _build_app(user):
 
             ui.space()
 
+            # ─── بطاقة الهوية الحالية ───
             with ui.element('div').classes('sidebar-user'):
                 ui.label(meta['initial']).classes('chat-avatar chat-avatar-sm') \
                     .style(f'background:{meta["bg"]}; color:{meta["fg"]}; '
@@ -124,49 +147,66 @@ def _build_app(user):
 
             ui.label('V 1.0').classes('footer-mark')
 
+    # ═══════════════════════════════════════════════════════
+    # المحتوى (البطاقات)
+    # ═══════════════════════════════════════════════════════
     with ui.element('div').classes('content-wrap'):
         for idx, page in enumerate(PAGES):
             with ui.column().classes('card') as card:
+                # رأس البطاقة
                 with ui.element('div').classes('card-header'):
                     ui.label('لوحة التحكم').classes('card-title')
                     ui.label(f'{idx+1:02d} / {len(PAGES):02d}').classes('card-index')
+
+                # جسم البطاقة (يبنيها ملف الصفحة)
                 with ui.column().classes('card-body'):
                     page_refs.append(page.build())
+
+                # تذييل البطاقة
                 with ui.element('div').classes('card-footer'):
                     ui.label('SIGNO SYSTEM').classes('footer-label')
                     with ui.element('div').style('display:flex;gap:5px'):
                         for _ in PAGES:
                             ui.element('div').style(
-                                'width:6px;height:6px;border:1px solid #000;border-radius:50%'
+                                'width:6px;height:6px;'
+                                'border:1px solid #000;border-radius:50%'
                             )
+
             card_elems.append(card)
 
+    # ─── اختيار الصفحة الافتراضية ───
     select(0)
 
+    # ═══════════════════════════════════════════════════════
+    # حلقة التحديث الدوري
+    # ═══════════════════════════════════════════════════════
     async def refresh():
         try:
-            await PAGES[state['i']].refresh(page_refs[state['i']])
+            page = PAGES[state['i']]
+            await page.refresh(page_refs[state['i']])
         except Exception as e:
-            print(f'[refresh] {e}')
+            print(f'[refresh] {e}', flush=True)
 
     ui.timer(0.1, refresh)
 
 
 # ═══════════════════════════════════════════════════════════
-# النشر على Render
+# التشغيل — يدعم Hugging Face Spaces + محلي
 # ═══════════════════════════════════════════════════════════
-_PORT = int(os.environ.get('PORT', 8080))
-_HOST = os.environ.get('HOST', '0.0.0.0')
-_SECRET = os.environ.get('STORAGE_SECRET', 'signo-secret-change-me-in-production')
+port = int(os.environ.get('PORT', 7860))
+storage_secret = os.environ.get(
+    'STORAGE_SECRET',
+    'signo-hf-secret-change-me-in-production',
+)
 
 ui.run(
-    host=_HOST,
-    port=_PORT,
+    host='0.0.0.0',
+    port=port,
     title='SIGNO',
     language='ar',
     dark=False,
     favicon='🧤',
     reload=False,
-    storage_secret=_SECRET,
+    storage_secret=storage_secret,
     show=False,
 )
